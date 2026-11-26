@@ -33,6 +33,7 @@ jobs:
         run: |
           ./gradlew --no-daemon :app:assembleDebug
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify app/build/outputs/apk/debug/app-debug.apk
+          unzip -Z1 app/build/outputs/apk/debug/app-debug.apk | grep -Fx assets/public/ocr/deu.traineddata
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sprit-tracker-android-test-apk

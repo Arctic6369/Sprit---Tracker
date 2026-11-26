@@ -56,6 +56,7 @@ if (Capacitor.getPlatform() === 'android') {
       corePath: './ocr',
       langPath: new URL('./ocr/', document.baseURI).href,
       workerBlobURL: false,
+      gzip: false,
     },
   };
 }
