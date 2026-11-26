@@ -1,0 +1,27 @@
+{
+  "name": "sprit-tracker",
+  "version": "2.0.0",
+  "private": true,
+  "engines": { "node": "22.x" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "android:sync": "npm run build && cap sync android",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.6.11",
+    "@capacitor/app": "7.1.2",
+    "@capacitor/camera": "7.0.5",
+    "@capacitor/core": "7.6.11",
+    "@capacitor/filesystem": "7.1.9",
+    "@capacitor/preferences": "7.0.4",
+    "@capacitor/share": "7.0.4",
+    "@tesseract.js-data/deu": "1.0.0",
+    "tesseract.js": "5.1.1",
+    "tesseract.js-core": "5.1.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "7.6.11",
+    "esbuild": "0.28.2"
+  }
+}

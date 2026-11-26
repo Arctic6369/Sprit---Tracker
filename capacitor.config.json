@@ -1,0 +1,9 @@
+{
+  "appId": "de.arctic6369.sprittracker",
+  "appName": "Sprit-Tracker",
+  "webDir": "dist",
+  "android": {
+    "adjustMarginsForEdgeToEdge": "auto",
+    "backgroundColor": "#121820"
+  }
+}
