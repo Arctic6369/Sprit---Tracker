@@ -1,198 +1,32 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spritverbrauch Tracker</title>
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #e0e0e0; margin: 0; padding: 15px; }
-        .card { background: #1e1e1e; padding: 15px; border-radius: 10px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        h2 { margin-top: 0; color: #4caf50; font-size: 1.2rem; }
-        label { display: block; margin: 10px 0 5px; font-size: 0.9rem; color: #aaa; }
-        input[type="number"] { width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #333; background: #2a2a2a; color: #fff; box-sizing: border-box; font-size: 1rem; }
-        .btn { background: #4caf50; color: white; border: none; padding: 12px; width: 100%; border-radius: 5px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 10px; display: block; text-align: center; box-sizing: border-box; }
-        .btn-secondary { background: #333; color: #ccc; margin-top: 5px; }
-        .status { font-size: 0.85rem; color: #ffa726; margin-top: 5px; min-height: 18px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
-        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #333; }
-        th { color: #aaa; }
-        .result-badge { font-size: 1.5rem; font-weight: bold; color: #4caf50; text-align: center; margin: 10px 0; }
-    </style>
-</head>
-<body>
-
-    <h1>⛽ Sprit-Tracker Pro</h1>
-
-    <div class="card">
-        <h2>1. Belege fotografieren</h2>
-        
-        <label>Tankrechnung (Sucht nach Litern):</label>
-        <input type="file" accept="image/*" capture="environment" id="receipt-file" style="display:none">
-        <button class="btn btn-secondary" onclick="document.getElementById('receipt-file').click()">📸 Rechnung scannen</button>
-        <div class="status" id="receipt-status">Bereit</div>
-
-        <label>Kilometerstand (Sucht nach Gesamtkilometern):</label>
-        <input type="file" accept="image/*" capture="environment" id="km-file" style="display:none">
-        <button class="btn btn-secondary" onclick="document.getElementById('km-file').click()">📸 Tacho scannen</button>
-        <div class="status" id="km-status">Bereit</div>
-    </div>
-
-    <div class="card">
-        <h2>2. Daten kontrollieren & speichern</h2>
-        <p style="font-size:0.8rem; color:#888; margin:0 0 10px 0;">Hier kannst du Fehler der Erkennung direkt korrigieren:</p>
-        
-        <label for="km-input">Aktueller Kilometerstand (km):</label>
-        <input type="number" id="km-input" placeholder="z.B. 124500" step="1">
-
-        <label for="liters-input">Getankte Liter (L):</label>
-        <input type="number" id="liters-input" placeholder="z.B. 45.23" step="0.01">
-
-        <button class="btn" onclick="saveEntry()">Eintrag berechnen & speichern</button>
-    </div>
-
-    <div class="card">
-        <h2>3. Letzte Berechnung</h2>
-        <div class="result-badge" id="current-consumption">- -</div>
-        
-        <h2>Historie</h2>
-        <div style="overflow-x:auto;">
-            <table id="history-table">
-                <thead>
-                    <tr>
-                        <th>Datum</th>
-                        <th>km-Stand</th>
-                        <th>Liter</th>
-                        <th>Verbrauch</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    </tbody>
-            </table>
-        </div>
-        <button class="btn btn-secondary" style="background:#cf6679; color:#000;" onclick="clearHistory()">Historie löschen</button>
-    </div>
-
-    <script>
-        // OCR-Verarbeitung für die Tankrechnung (sucht nach typischen Liter-Mustern)
-        document.getElementById('receipt-file').addEventListener('change', function(e) {
-            processImage(e.target.files[0], 'receipt-status', text => {
-                // Regulärer Ausdruck sucht nach Zahlen mit "L", "Lit", "Liter" oder Kommawerten vor "EUR"
-                const literRegex = /(\d+[,.\s]\d{2})\s*(?:l|lit|liter|ltr)/i;
-                const match = text.match(literRegex);
-                if (match) {
-                    let val = match[1].replace(',', '.').replace(/\s/g, '');
-                    document.getElementById('liters-input').value = parseFloat(val);
-                    return "Liter erfolgreich erkannt!";
-                }
-                return "Text erkannt, aber Liter-Muster nicht eindeutig. Bitte manuell eintragen.";
-            });
-        });
-
-        // OCR-Verarbeitung für den Kilometerstand
-        document.getElementById('km-file').addEventListener('change', function(e) {
-            processImage(e.target.files[0], 'km-status', text => {
-                // Findet längere Zahlenketten (oft 5-6 stellig für km-Stände)
-                const numbers = text.match(/\b\d{5,6}\b/g);
-                if (numbers && numbers.length > 0) {
-                    // Nimmt die wahrscheinlichste Zahl (oft die größte oder erste gefundene)
-                    let highest = Math.max(...numbers.map(Number));
-                    document.getElementById('km-input').value = highest;
-                    return "Kilometerstand erfolgreich erkannt!";
-                }
-                return "km-Stand nicht eindeutig erkannt. Bitte manuell eintragen.";
-            });
-        });
-
-        function processImage(file, statusId, extractionLogic) {
-            if (!file) return;
-            const statusDiv = document.getElementById(statusId);
-            statusDiv.innerText = "⏳ Bild wird analysiert...";
-            
-            Tesseract.recognize(file, 'deu', { logger: m => console.log(m) })
-                .then(({ data: { text } }) => {
-                    console.log("Erkannter Text:", text);
-                    statusDiv.innerText = extractionLogic(text);
-                })
-                .catch(err => {
-                    console.error(err);
-                    statusDiv.innerText = "❌ Fehler bei der Erkennung.";
-                });
-        }
-
-        // Daten speichern, berechnen und im lokalen Speicher ablegen
-        function saveEntry() {
-            const km = parseFloat(document.getElementById('km-input').value);
-            const liters = parseFloat(document.getElementById('liters-input').value);
-            
-            if (!km || !liters) {
-                alert("Bitte fülle beide Felder aus (oder korrigiere die Erkennung).");
-                return;
-            }
-
-            let history = JSON.parse(localStorage.getItem('fuel_history')) || [];
-            
-            let consumption = "- -";
-            if (history.length > 0) {
-                const lastEntry = history[0]; // Letzter Eintrag ist der neueste
-                const distance = km - lastEntry.km;
-                if (distance > 0) {
-                    consumption = ((liters / distance) * 100).toFixed(2) + " L/100km";
-                    document.getElementById('current-consumption').innerText = consumption;
-                } else {
-                    alert("Der neue Kilometerstand muss höher sein als der letzte (" + lastEntry.km + " km)!");
-                    return;
-                }
-            } else {
-                document.getElementById('current-consumption').innerText = "Erster Eintrag! (Verbrauch ab nächstem Tanken)";
-            }
-
-            const newEntry = {
-                date: new Date().toLocaleDateString('de-DE'),
-                km: km,
-                liters: liters,
-                consumption: consumption
-            };
-
-            history.unshift(newEntry); // Vorne anfügen
-            localStorage.setItem('fuel_history', JSON.stringify(history));
-            
-            loadHistory();
-            
-            // Felder leeren für das nächste Mal
-            document.getElementById('km-input').value = '';
-            document.getElementById('liters-input').value = '';
-            document.getElementById('receipt-status').innerText = 'Bereit';
-            document.getElementById('km-status').innerText = 'Bereit';
-        }
-
-        function loadHistory() {
-            const history = JSON.parse(localStorage.getItem('fuel_history')) || [];
-            const tbody = document.querySelector('#history-table tbody');
-            tbody.innerHTML = '';
-            
-            history.forEach(entry => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td>${entry.date}</td>
-                    <td>${entry.km} km</td>
-                    <td>${entry.liters} L</td>
-                    <td style="font-weight:bold; color:#4caf50;">${entry.consumption}</td>
-                `;
-                tbody.appendChild(tr);
-            });
-        }
-
-        function clearHistory() {
-            if(confirm("Möchtest du wirklich alle Einträge löschen?")) {
-                localStorage.removeItem('fuel_history');
-                document.getElementById('current-consumption').innerText = "- -";
-                loadHistory();
-            }
-        }
-
-        // Beim Start alte Daten laden
-        window.onload = loadHistory;
-    </script>
-</body>
-</html>
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#121820"><title>Sprit-Tracker 2.0</title><link rel="manifest" href="manifest.webmanifest"><script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script><style>
+*{box-sizing:border-box}body{margin:0;background:#121820;color:#e7edf4;font:16px system-ui,sans-serif}main{max-width:850px;margin:auto;padding:18px}h1{font-size:1.8rem}h2{font-size:1.2rem;color:#82d9aa}section{background:#1d2733;border-radius:14px;padding:16px;margin:16px 0}label{display:block;margin:9px 0;color:#c5d3e1}input,select,button{font:inherit;border:1px solid #526071;border-radius:8px;padding:10px;color:inherit;background:#15202b}input:not([type=checkbox]),select{width:100%}button{cursor:pointer;margin:5px 4px 5px 0;min-height:44px}button.primary{background:#82d9aa;color:#10271c;font-weight:bold}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}.metric{background:#15202b;padding:12px;border-radius:9px}.metric strong{display:block;font-size:1.35rem;color:#82d9aa}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap}td,th{padding:9px;border-bottom:1px solid #405060;text-align:left}small,p{color:#b9c6d2}#status{white-space:pre-wrap;color:#f1cf86}svg{width:100%;height:auto}button:disabled{opacity:.5}
+</style></head><body><main><header><h1>⛽ Sprit-Tracker 2.0</h1><p>Dein digitales Tankbuch · lokal gespeichert</p></header><section><h2>Übersicht</h2><div id="metrics" class="grid"></div><div id="chart"></div><p id="monthly"></p></section><section><h2 id="heading">Tankvorgang erfassen</h2><input type="file" id="receipt" accept="image/*" capture="environment" hidden><input type="file" id="tach" accept="image/*" capture="environment" hidden><button id="scanReceipt">📷 Tankbeleg</button><button id="scanTach">📷 Tacho</button><div id="status" role="status"></div><form id="form"><div class="grid"><label>Datum<input id="date" type="date" required></label><label>Kilometerstand<input id="km" type="number" min="0" max="9999999" step="1" required></label><label>Liter<input id="liters" type="number" min=".01" max="300" step=".001" required></label><label>Preis €/Liter (optional)<input id="price" type="number" min="0" max="20" step=".001"></label><label>Gesamt € (optional)<input id="cost" type="number" min="0" max="6000" step=".01"></label><label>Tankfüllung<select id="full"><option value="yes">Vollgetankt</option><option value="no">Teilbetankung</option><option value="unknown">Unbekannt</option></select></label></div><p>Verbrauch wird nur zwischen zwei bestätigten Vollbetankungen berechnet. OCR-Werte bitte kontrollieren.</p><button class="primary" type="submit">Speichern</button><button type="button" id="cancel">Abbrechen / leeren</button></form></section><section><h2>Tankhistorie</h2><div class="scroll"><table><thead><tr><th>Datum</th><th>km</th><th>Liter</th><th>€/L</th><th>€</th><th>Tank</th><th>L/100 km</th><th>Aktion</th></tr></thead><tbody id="rows"></tbody></table></div></section><section><h2>Datensicherung</h2><button id="backup">JSON-Sicherung</button><button id="csv">CSV für Excel</button><button id="restore">Import JSON/CSV</button><input id="import" type="file" accept=".json,.csv" hidden><p>Exportiere regelmäßig eine Sicherung. Browserdaten können gelöscht werden; PC und Handy synchronisieren nicht automatisch. Alte Daten werden unverändert aus Version 1 übernommen, Tankfüllungsart bleibt unbekannt bis zur Korrektur.</p><p id="storage"></p></section></main><script>
+'use strict';
+const $=id=>document.getElementById(id), KEY='fuel_history_v2', LEGACY='fuel_history';
+let entries=[], editing=null, blocked=false;
+const id=()=>globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2);
+const today=()=>{let d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-')};
+const fmt=(n,d=2)=>n==null?'–':Number(n).toLocaleString('de-DE',{minimumFractionDigits:d,maximumFractionDigits:d});
+function dateISO(s){s=String(s);if(/^\d{4}-\d{2}-\d{2}$/.test(s)){let d=new Date(s+'T00:00:00Z');return !isNaN(d)&&d.toISOString().slice(0,10)===s?s:''}let m=s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);return m?dateISO(m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0')):''}
+function optional(v){return v==null||String(v).trim()===''?null:Number(String(v).replace(',','.'))}
+function normalize(e){let x={id:String(e.id||id()),date:dateISO(e.date),km:optional(e.km),liters:optional(e.liters),price:optional(e.price),cost:optional(e.cost),full:['yes','no','unknown'].includes(e.full)?e.full:'unknown'};if(!x.date||!Number.isInteger(x.km)||x.km<0||x.km>9999999||!Number.isFinite(x.liters)||x.liters<=0||x.liters>300||[x.price,x.cost].some(v=>v!==null&&(!Number.isFinite(v)||v<0))||x.price>20||x.cost>6000)throw Error('Ungültiger Tankdatensatz');if(x.cost===null&&x.price!==null)x.cost=Math.round(x.price*x.liters*100)/100;if(x.price===null&&x.cost!==null)x.price=Math.round(x.cost/x.liters*1000)/1000;if(x.price>20||x.cost>6000)throw Error('Preis oder Kosten außerhalb des zulässigen Bereichs');return x}
+function checked(arr){if(!Array.isArray(arr))throw Error('Keine Datensatzliste');const a=arr.map(normalize).sort((a,b)=>a.km-b.km||a.date.localeCompare(b.date));if(new Set(a.map(e=>e.id)).size!==a.length)throw Error('Doppelte IDs');if(a.some((e,i)=>i&&e.date<a[i-1].date))throw Error('Datum und Kilometerstand widersprechen sich');return a}
+function calc(a){let anchor=null, liters=0, valid=true,totalL=0,totalKm=0;const values=new Map();for(const e of a){if(anchor){liters+=e.liters;if(e.full==='unknown')valid=false}if(e.full==='yes'){if(anchor&&valid&&e.km>anchor.km){let km=e.km-anchor.km;values.set(e.id,100*liters/km);totalL+=liters;totalKm+=km}anchor=e;liters=0;valid=true}}return {values,avg:totalKm?100*totalL/totalKm:null}}
+function persist(a){if(blocked)throw Error('Speicher nicht verfügbar. Bitte zuerst Daten sichern.');let next=checked(a);localStorage.setItem(KEY,JSON.stringify(next));entries=next;render()}
+function load(){try{let raw=localStorage.getItem(KEY);entries=checked(JSON.parse(raw??localStorage.getItem(LEGACY)??'[]'));if(raw===null)localStorage.setItem(KEY,JSON.stringify(entries));$('storage').textContent='Lokaler Speicher verfügbar.'}catch(e){blocked=true;$('storage').textContent='Speicherfehler: '+e.message+'. Originaldaten werden nicht überschrieben.'}}
+function el(tag,text){let n=document.createElement(tag);n.textContent=text;return n}
+function render(){const c=calc(entries),latest=[...entries].reverse().find(e=>c.values.has(e.id)),month=today().slice(0,7),monthly=entries.filter(e=>e.date.startsWith(month)),known=monthly.filter(e=>e.cost!==null),metrics=$('metrics');metrics.replaceChildren();for(const [k,v] of [['Letzter Verbrauch',fmt(latest?c.values.get(latest.id):null)+' L/100 km'],['Durchschnitt',fmt(c.avg)+' L/100 km'],['Tankvorgänge',String(entries.length)],['Kosten diesen Monat',known.length?fmt(known.reduce((s,e)=>s+e.cost,0))+' €':'–']]){let box=el('div',k);box.className='metric';box.append(el('strong',v));metrics.append(box)}$('monthly').textContent=monthly.length-known.length?'Monatskosten unvollständig: '+(monthly.length-known.length)+' Einträge ohne Preis.':'';let rows=$('rows');rows.replaceChildren();for(const e of [...entries].reverse()){let tr=document.createElement('tr');for(const v of [e.date.split('-').reverse().join('.'),fmt(e.km,0),fmt(e.liters,3),fmt(e.price,3),fmt(e.cost),({yes:'Voll',no:'Teil',unknown:'?'})[e.full],fmt(c.values.get(e.id))])tr.append(el('td',v));let td=document.createElement('td');for(const [t,f] of [['Bearbeiten',()=>edit(e)],['Löschen',()=>{if(confirm('Diesen Tankvorgang löschen?'))try{persist(entries.filter(x=>x.id!==e.id));if(editing===e.id)reset()}catch(err){alert(err.message)}}]]){let b=el('button',t);b.onclick=f;td.append(b)}tr.append(td);rows.append(tr)}draw(entries.filter(e=>c.values.has(e.id)).map(e=>c.values.get(e.id)))}
+function draw(vals){let box=$('chart');box.replaceChildren(el('p','Verbrauchsentwicklung · letzte 20 gültige Messungen'));vals=vals.slice(-20);if(!vals.length){box.append(el('p','Noch keine bestätigte Volltankstrecke.'));return}let ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 600 180');svg.setAttribute('role','img');svg.setAttribute('aria-label','Verbrauch in Litern pro 100 km');let max=Math.max(...vals,1)*1.1;let pts=vals.map((v,i)=>[30+i*540/Math.max(1,vals.length-1),145-v/max*120]);let line=document.createElementNS(ns,'polyline');line.setAttribute('points',pts.map(p=>p.join(',')).join(' '));line.setAttribute('fill','none');line.setAttribute('stroke','#82d9aa');line.setAttribute('stroke-width','3');svg.append(line);pts.forEach((p,i)=>{let circle=document.createElementNS(ns,'circle');circle.setAttribute('cx',p[0]);circle.setAttribute('cy',p[1]);circle.setAttribute('r','4');circle.setAttribute('fill','#82d9aa');let title=document.createElementNS(ns,'title');title.textContent=fmt(vals[i])+' L/100 km';circle.append(title);svg.append(circle)});box.append(svg)}
+function reset(){editing=null;$('form').reset();$('date').value=today();$('heading').textContent='Tankvorgang erfassen';$('status').textContent=''}
+function edit(e){editing=e.id;for(const k of ['date','km','liters','price','cost','full'])$(k).value=e[k]??'';$('heading').textContent='Tankvorgang bearbeiten';$('heading').scrollIntoView({behavior:'smooth'})}
+$('cancel').onclick=reset;$('form').onsubmit=e=>{e.preventDefault();try{let x=normalize({id:editing||id(),...Object.fromEntries(['date','km','liters','price','cost','full'].map(k=>[k,$(k).value]))});if(entries.some(y=>y.id!==x.id&&y.km===x.km&&y.date===x.date&&y.liters===x.liters)&&!confirm('Sehr ähnlicher Eintrag vorhanden. Trotzdem speichern?'))return;if(x.price!==null&&x.cost!==null&&Math.abs(x.price*x.liters-x.cost)>.1&&!confirm('Literpreis und Gesamtbetrag weichen voneinander ab. Trotzdem speichern?'))return;persist([...entries.filter(y=>y.id!==x.id),x]);reset()}catch(err){alert(err.message)}};
+let busy=false;
+function decimal(s){return Number(s.replace(',','.'))}
+async function scan(file,kind){if(!file||busy)return;busy=true;$('scanReceipt').disabled=$('scanTach').disabled=true;$('status').textContent='Bild wird analysiert…';try{if(!globalThis.Tesseract)throw Error('OCR nicht geladen; Internetverbindung prüfen');let {data}=await Tesseract.recognize(file,'deu',{logger:m=>{if(m.status==='recognizing text')$('status').textContent='Texterkennung '+Math.round(m.progress*100)+' %'}});let t=data.text, found=[];if(kind==='receipt'){let matches=[...t.matchAll(/\b(\d{1,3}[,.]\d{1,3})\s*(?:liter|ltr|l)\b(?!\s*\/)/gi)].map(m=>decimal(m[1])).filter(x=>x>0&&x<=300);if(matches.length){$('liters').value=matches[0];found.push('Liter')}let p=t.match(/(\d{1,2}[,.]\d{3})\s*(?:€|eur)\s*\/\s*l\b/i);if(p){$('price').value=decimal(p[1]);found.push('Literpreis')}let c=t.match(/(?:gesamt(?:betrag|summe)?|summe|total|betrag)\s*[:\s]*(?:EUR|€)?\s*(\d{1,4}[,.]\d{2})/i);if(c){$('cost').value=decimal(c[1]);found.push('Gesamtbetrag')}}else{let m=t.match(/\b(\d{1,3}(?:[.\s]\d{3}){1,2}|\d{1,7})\s*km\b/i);let candidates=[...t.matchAll(/\b\d{3,7}\b/g)].map(m=>Number(m[0]));let n=m?Number(m[1].replace(/[.\s]/g,'')):candidates.length===1?candidates[0]:null;if(n!==null){$('km').value=n;found.push('Kilometerstand')}}$('status').textContent=(found.length?'Vorschlag: '+found.join(', '):'Keine eindeutige Erkennung')+'. Bitte prüfen.\nErkannter Text:\n'+t.slice(0,1200)}catch(e){$('status').textContent='OCR-Fehler: '+e.message+' – manuell eingeben.'}finally{busy=false;$('scanReceipt').disabled=$('scanTach').disabled=false}}
+for(const [button,input,kind] of [['scanReceipt','receipt','receipt'],['scanTach','tach','tach']]){$(button).onclick=()=>$(input).click();$(input).onchange=()=>{scan($(input).files[0],kind);$(input).value=''}}
+function download(name,data,type){let url=URL.createObjectURL(new Blob([data],{type})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+$('backup').onclick=()=>download('sprit-backup-'+today()+'.json',JSON.stringify({version:2,entries},null,2),'application/json');
+const cols=['id','date','km','liters','price','cost','full'];$('csv').onclick=()=>download('sprit-'+today()+'.csv','\ufeff'+cols.join(';')+'\r\n'+entries.map(e=>cols.map(k=>k==='id'?encodeURIComponent(e[k]):String(e[k]??'').replace('.',typeof e[k]==='number'?',':'.')).join(';')).join('\r\n'),'text/csv;charset=utf-8');
+$('restore').onclick=()=>$('import').click();$('import').onchange=async()=>{try{let f=$('import').files[0];if(!f)return;let t=(await f.text()).replace(/^\ufeff/,'');let a;if(f.name.toLowerCase().endsWith('.csv')){let [h,...lines]=t.trim().split(/\r?\n/);let keys=h.split(';');if(!cols.every(k=>keys.includes(k)))throw Error('CSV muss das Exportformat des Trackers verwenden');a=lines.filter(Boolean).map(line=>{let cells=line.split(';');if(cells.length!==keys.length)throw Error('Ungültige CSV-Zeile');let obj=Object.fromEntries(keys.map((k,i)=>[k,cells[i]]));obj.id=decodeURIComponent(obj.id);return obj})}else{let j=JSON.parse(t);a=Array.isArray(j)?j:j.entries}let next=checked(a);if(confirm(next.length+' Datensätze importieren? Bestehende Historie wird ersetzt. Vorher Sicherung exportieren.')){persist(next);reset()}}catch(e){alert('Import fehlgeschlagen: '+e.message)}finally{$('import').value=''}};
+load();reset();render();if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(console.warn);
+</script></body></html>
