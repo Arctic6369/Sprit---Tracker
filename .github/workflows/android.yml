@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
         with:
           distribution: temurin
-          java-version: '21.0.8+9'
+          java-version: '21.0.11'
           cache: gradle
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - run: npm ci
