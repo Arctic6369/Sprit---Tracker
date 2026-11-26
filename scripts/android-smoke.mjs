@@ -32,7 +32,8 @@ async function waitFor(label, probe, timeout = 30_000) {
 }
 
 function nodes() {
-  adb('shell', 'uiautomator', 'dump', '/sdcard/sprit-ui.xml');
+  const result = adb('shell', 'uiautomator', 'dump', '/sdcard/sprit-ui.xml');
+  if (!result.includes('dumped to:')) return [];
   return adb('shell', 'cat', '/sdcard/sprit-ui.xml').match(/<node\b[^>]*>/g) ?? [];
 }
 
@@ -109,6 +110,8 @@ async function installImportFixture(name, content) {
   const file = join(temp, name);
   writeFileSync(file, content, 'utf8');
   adb('push', file, '/sdcard/Download/' + name);
+  adb('shell', 'am', 'broadcast', '-a', 'android.intent.action.MEDIA_SCANNER_SCAN_FILE',
+    '-d', 'file:///sdcard/Download/' + name);
   await evaluate("document.getElementById('restore').click(); null");
   const filePattern = new RegExp('text="' + name.replace('.', '\\.') + '"');
   const entry = await waitFor('Dateiauswahl geöffnet', () =>
@@ -117,26 +120,26 @@ async function installImportFixture(name, content) {
     tap(entry);
   } else {
     tap(entry);
-    await tapWhen('Downloads im Dateiauswahldialog', /text="Downloads"/);
+    await tapWhen('Downloads im Dateiauswahldialog', /text="Downloads" resource-id="android:id\/title"/);
     await tapWhen('Importdatei im Dateiauswahldialog', filePattern);
   }
-  await tapWhen('Importbestätigung', /resource-id="android:id\/button1"/);
+  await waitFor('Importbestätigung für ' + name, () => nodes().some(node => node.includes('Datensätze importieren?')));
+  await tapWhen('Import bestätigen', /resource-id="android:id\/button1"/);
 }
 
 async function exportThroughChooser(button, suffix) {
   await evaluate("document.getElementById('" + button + "').click(); null");
-  await waitFor('Android-Teiledialog für ' + suffix, () => {
-    const activity = adb('shell', 'dumpsys', 'activity', 'activities');
-    return /(?:mResumedActivity|topResumedActivity):.*(?:ChooserActivity|ResolverActivity)/.test(activity);
-  });
+  const preview = new RegExp('text="[^"]+' + suffix.replace('.', '\\.') + '"[^>]*resource-id="[^"]*/content_preview_filename"');
+  await waitFor('Android-Teiledialog für ' + suffix, () => nodes().some(node => preview.test(node)));
   const paths = adb('shell', 'run-as', app, 'find', 'cache/exports', '-type', 'f').split('\n');
   const path = paths.find(path => path.endsWith(suffix));
   assert.ok(path, 'Android-Exportdatei ' + suffix + ' fehlt.');
-  const contents = adb('shell', 'run-as', app, 'cat', path);
+  // exec-out preserves the CSV's CRLF bytes instead of adding a terminal CR.
+  const contents = execFileSync('adb', ['exec-out', 'run-as', app, 'cat', path],
+    { encoding: 'utf8', timeout: 25_000 });
   back();
   await waitFor('Rückkehr aus dem Teiledialog', () =>
-    new RegExp('(?:mResumedActivity|topResumedActivity):.*' + app.replaceAll('.', '\\.')).test(
-      adb('shell', 'dumpsys', 'activity', 'activities')));
+    nodes().some(node => node.includes('class="android.webkit.WebView"') && node.includes('package="' + app + '"')));
   return contents;
 }
 
@@ -157,7 +160,8 @@ try {
   assert.equal(JSON.parse(json).entries.length, 3);
   const csv = await exportThroughChooser('csv', '.csv');
   assert.match(csv, /teil;2025-01-02;1200;10,25;;;no/);
-  await installImportFixture('sprit-smoke.csv', '\ufeff' + csv.replace('teil;', 'teil-csv;'));
+  assert.match(csv, /^\ufeffid;date;km;liters;price;cost;full\r\n/);
+  await installImportFixture('sprit-smoke.csv', csv.replace('teil;', 'teil-csv;'));
   await waitFor('CSV in der Historie', () => evaluate("entries.some(entry => entry.id === 'teil-csv')"));
   assert.equal(await evaluate('calc(entries).avg'), 8);
   console.log('Android-Teiledialog: JSON und CSV exportiert, CSV über Dateiauswahl wieder importiert.');
@@ -190,7 +194,10 @@ try {
   console.error('Letzter App-Status und Dialog:', await evaluate(
     "document.getElementById('status')?.textContent"
   ).catch(() => null));
-  try { console.error(nodes().join('\n')); } catch {}
+  try {
+    console.error(nodes().map(node => node.match(/text="[^"]*" resource-id="[^"]*"/)?.[0])
+      .filter(label => label && label !== 'text="" resource-id=""').join('\n'));
+  } catch {}
   throw error;
 } finally {
   socket?.close();
